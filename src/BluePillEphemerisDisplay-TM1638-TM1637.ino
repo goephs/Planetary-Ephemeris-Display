@@ -234,9 +234,32 @@ void loop() {
       Serial.println(error.f_str());
       return;
     }
+///////////////////////////
+    // 🔌 Read SPST switch
+    bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;
 
-    bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;  // HIGH = UTC, LOW = Local
+    // 📅 Detect UTC rollover
+    String localDate = String(doc["LocalTime"]).substring(0, 10);
+    String utcDate   = String(doc["time"]).substring(0, 10);
+    bool utcIsNextDay = (utcDate != localDate);
 
+    // 🎛️ Read TM1638 buttons
+    uint8_t buttons = tm1638.readButtons();
+    for (int i = 0; i < 7; i++) {
+      if (buttons & (1 << i)) {
+        activePlanetIndex = i;
+        break;
+      }
+    }
+
+    // 🪐 Get planet data
+    const PlanetDisplay& planet = planets[activePlanetIndex];
+    const char* riseStr = useUTC ? doc[planet.jsonKey + String("Rise")] : doc[planet.jsonKey + String("Rise")];
+    const char* setStr  = useUTC ? doc[planet.jsonKey + String("Set")]  : doc[planet.jsonKey + String("Set")];
+
+    // 🖥️ Display planet rise/set
+    displayPlanet(planet.name, riseStr, setStr, useUTC, utcIsNextDay);
+/////////////////////////
     // Fetch the values from the JSON structure   
 
     //const char* LocalTime = doc["LocalTime"];  // "2025/1/16 13:22:30"
@@ -477,6 +500,16 @@ void loop() {
     }
   }
 }
+void displayPlanet(const char* label, const char* riseStr, const char* setStr, bool useUTC, bool utcIsNextDay) {
+  String riseTime = String(riseStr).substring(11, 16);  // "HH:MM"
+  String setTime  = String(setStr).substring(11, 16);   // "HH:MM"
+  String mode     = useUTC ? (utcIsNextDay ? "U+1" : "UTC") : "LOC";
+
+  String displayStr = String(label) + " " + riseTime + " " + setTime + " " + mode;
+  displayText(displayStr);  // Your TM1638/TM1637 output function
+}
+
+
 void convertUTCToLocal(const char* utcTime, char* output) {
   // Extract hours, minutes, seconds from fixed positions
   int hour = (utcTime[0] - '0') * 10 + (utcTime[1] - '0');
