@@ -87,8 +87,15 @@ bool MarsActive = false;
 bool JupiterActive = false;
 bool SaturnActive = false;
 
+// switch from Local time to UTC time display
+
+#define MODE_SWITCH_PIN PA0
+bool useUTC = false;
+
 void setup() {
-  // Start the default serial console
+  pinMode(MODE_SWITCH_PIN, INPUT_PULLUP);  // Active LOW
+  
+   // Start the default serial console
   Serial.begin(115200);
 
   // Start UART2 at the same baud rate as Pi
@@ -121,7 +128,6 @@ void setup() {
 }
 
 void loop() {
-
   int buttonState = digitalRead(BUTTON_PIN);
   if (buttonState == LOW && (millis() - lastDebounceTime) > debounceDelay) {
     lastDebounceTime = millis();
@@ -229,8 +235,9 @@ void loop() {
       return;
     }
 
+    bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;  // HIGH = UTC, LOW = Local
 
-    // Fetch the values from the JSON structure
+    // Fetch the values from the JSON structure   
 
     //const char* LocalTime = doc["LocalTime"];  // "2025/1/16 13:22:30"
     const char* date = doc["date"];            // "2025-01-16"
