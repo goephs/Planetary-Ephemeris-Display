@@ -95,7 +95,7 @@ bool useUTC = false;
 void setup() {
   pinMode(MODE_SWITCH_PIN, INPUT_PULLUP);  // Active LOW
 
-   // Start the default serial console
+  // Start the default serial console
   Serial.begin(115200);
 
   // Start UART2 at the same baud rate as Pi
@@ -234,48 +234,65 @@ void loop() {
       Serial.println(error.f_str());
       return;
     }
-///////////////////////////
-// 🔌 Read SPST switch
-bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;
+    ///////////////////////////
+    // 🔌 Read SPST switch
+    bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;
 
-// Fetch time and date from JSON
-const char* date    = doc["date"];           // "2025-01-16"
-const char* UTCtime = doc["time"];           // "18:22:27.000Z"
+    // Fetch time and date from JSON
+    const char* date = doc["date"];     // "2025-01-16"
+    const char* UTCtime = doc["time"];  // "18:22:27.000Z"
 
-char cleanTime[9];     // HH:MM:SS
-strncpy(cleanTime, UTCtime, 8);
-cleanTime[8] = '\0';
+    char cleanTime[9];  // HH:MM:SS
+    strncpy(cleanTime, UTCtime, 8);
+    cleanTime[8] = '\0';
 
-bool utcIsNextDay = false;
-char utcDate[11];      // YYYY-MM-DD
-char localDate[11];    // YYYY-MM-DD
-char localTime[9];     // HH-MM-SS
+    bool utcIsNextDay = false;
+    char UtcDate[11];    // YYYY-MM-DD
+    char LocalDate[11];  // YYYY-MM-DD
+    char LocalTime[9];   // HH-MM-SS
 
-// Copy UTC date into buffer
-strncpy(utcDate, date, 10);
-utcDate[10] = '\0';
+    // Copy UTC date into buffer
+    strncpy(UtcDate, date, 10);
+    UtcDate[10] = '\0';
+    // Convert time and detect rollover
+    bool isDST = isDateInDST(LocalDate);  // Use localDate (already adjusted for rollover)
+    int utcOffset = isDST ? -4 : -5;
+    convertUTCToLocal(cleanTime, LocalTime, &utcIsNextDay, utcOffset);
 
-// Convert time and detect rollover
-convertUTCToLocal(cleanTime, localTime, &utcIsNextDay);
+    // Adjust local date if rollover occurred
+    if (utcIsNextDay) {
+      decrementDate(UtcDate, LocalDate);
+    } else {
+      strncpy(LocalDate, UtcDate, 11);
+    }
 
-// Adjust local date if rollover occurred
-if (utcIsNextDay) {
-  decrementDate(utcDate, localDate);
-} else {
-  strncpy(localDate, utcDate, 11);
-}
+    // Debug print
+    Serial.print(F("DST active: "));
+    Serial.println(isDST ? F("Yes") : F("No"));
+    Serial.print(F("UTC Offset: "));
+    Serial.println(utcOffset);
 
-// Debug print
-Serial.print(F("Local Time: "));
-Serial.println(localTime);
-Serial.print(F("UTC Time: "));
-Serial.println(cleanTime);
-Serial.print(F("Local Date: "));
-Serial.println(localDate);
-Serial.print(F("UTC Date: "));
-Serial.println(utcDate);
+    Serial.print(F("Local Time: "));
+    Serial.println(LocalTime);
+    Serial.print(F("UTC Time: "));
+    Serial.println(cleanTime);
+    Serial.print(F("Local Date: "));
+    Serial.println(LocalDate);
+    Serial.print(F("UTC Date: "));
+    Serial.println(UtcDate);
+    /*
+    char LocalDisplayDate[9];
+    int year, month, day;
+    // Parse the input string
+    sscanf(date, "%d-%d-%d", &year, &month, &day);
+    // Format into the new string
+    sprintf(LocalDisplayDate, "%02d-%02d-%02d", month, day, year % 100);
 
-
+    display1.println(LocalDisplayDate);
+    display2.println(LocalTime);
+    //display2.println(LocalDisplayTime);
+*/
+    /*
     // 🎛️ Read TM1638 buttons
     uint8_t buttons = tm1638.readButtons();
     for (int i = 0; i < 7; i++) {
@@ -292,17 +309,9 @@ Serial.println(utcDate);
 
     // 🖥️ Display planet rise/set
     displayPlanet(planet.name, riseStr, setStr, useUTC, utcIsNextDay);
-/////////////////////////
+    */
+    /////////////////////////
     // Fetch the values from the JSON structure
-
-    //const char* LocalTime = doc["LocalTime"];  // "2025/1/16 13:22:30"
-    const char* date = doc["date"];            // "2025-01-16"
-    const char* UTCtime = doc["time"];         // "18:22:27.000Z"
-
-    char LocalTime[9];  // HH-MM-SS + null
-    convertUTCToLocal(UTCtime, LocalTime);  // invoke the conversion routine for local time
-    Serial.println(LocalTime);  // Output: 09-30-45
-
     const char* latitudeString = doc["latitude"];
     float latitude = convertDMSToDecimal(latitudeString);
     Serial.print("Latitude in deg:mm:ss ");
@@ -323,26 +332,7 @@ Serial.println(utcDate);
     Serial.print("Longitude in decimal degrees: ");
     Serial.println(longitude, 6);
     float altitude = doc["altitude"];  // 63.64399999999999
-    Serial.print("Localtime ");
-    Serial.println(LocalTime);
-    Serial.print("date ");
-    Serial.println(date);
-    Serial.print("UTCtime ");
-    Serial.println(UTCtime);
-
-
     display4.println(F(longitudeString));
-
-    char LocalDisplayDate[9];
-    int year, month, day;
-    // Parse the input string
-    sscanf(date, "%d-%d-%d", &year, &month, &day);
-    // Format into the new string
-    sprintf(LocalDisplayDate, "%02d-%02d-%02d", month, day, year % 100);
-
-    display1.println(LocalDisplayDate);
-    display2.println(LocalTime);
-    //display2.println(LocalDisplayTime);
 
     Serial.print("altitude ");
     Serial.println(altitude);
@@ -536,7 +526,7 @@ Serial.println(utcDate);
 void displayPlanet(const char* label, const char* riseStr, const char* setStr, bool useUTC, bool utcIsNextDay) {
   // Extract HH:MM from timestamp string: "2025/9/19 06:39:32"
   String riseTime = String(riseStr).substring(11, 16);  // "06:39"
-  String setTime  = String(setStr).substring(11, 16);   // "18:56"
+  String setTime = String(setStr).substring(11, 16);    // "18:56"
 
   // Optional: annotate mode
   // String modeLabel = useUTC ? (utcIsNextDay ? "UTC+1" : "UTC") : "LOCAL";
@@ -546,16 +536,39 @@ void displayPlanet(const char* label, const char* riseStr, const char* setStr, b
   display_set.println(setTime);    // Right module
 }
 
+bool isDateInDST(const char* dateStr) {
+  // Input: "YYYY-MM-DD"
+  int year = (dateStr[0] - '0') * 1000 + (dateStr[1] - '0') * 100 + (dateStr[2] - '0') * 10 + (dateStr[3] - '0');
+  int month = (dateStr[5] - '0') * 10 + (dateStr[6] - '0');
+  int day = (dateStr[8] - '0') * 10 + (dateStr[9] - '0');
 
-void convertUTCToLocal(const char* utcTime, char* output, bool* didRollover) {
+  // Compute second Sunday in March
+  int marchStart = (5 + (year * 5 / 4)) % 7;  // March 1 weekday (0=Sun)
+  int secondSundayMarch = (marchStart <= 0) ? 8 : (15 - marchStart);
+
+  // Compute first Sunday in November
+  int novStart = (2 + (year * 5 / 4)) % 7;  // Nov 1 weekday
+  int firstSundayNov = (novStart == 0) ? 1 : (8 - novStart);
+
+  // Check if date is between DST start and end
+  if ((month > 3 && month < 11) || (month == 3 && day >= secondSundayMarch) || (month == 11 && day < firstSundayNov)) {
+    return true;
+  }
+  return false;
+}
+
+void convertUTCToLocal(const char* utcTime, char* output, bool* didRollover, int utcOffsetHours) {
   int hour = (utcTime[0] - '0') * 10 + (utcTime[1] - '0');
   int minute = (utcTime[3] - '0') * 10 + (utcTime[4] - '0');
   int second = (utcTime[6] - '0') * 10 + (utcTime[7] - '0');
 
-  hour -= 5;
+  hour += utcOffsetHours;
   if (hour < 0) {
     hour += 24;
-    *didRollover = true;  // UTC was early morning, local is previous day
+    *didRollover = true;
+  } else if (hour >= 24) {
+    hour -= 24;
+    *didRollover = false;  // You could add forward rollover here if needed
   } else {
     *didRollover = false;
   }
@@ -564,11 +577,11 @@ void convertUTCToLocal(const char* utcTime, char* output, bool* didRollover) {
 }
 
 void decrementDate(const char* inputDate, char* outputDate) {
-  int year  = (inputDate[0] - '0') * 1000 + (inputDate[1] - '0') * 100 + (inputDate[2] - '0') * 10 + (inputDate[3] - '0');
+  int year = (inputDate[0] - '0') * 1000 + (inputDate[1] - '0') * 100 + (inputDate[2] - '0') * 10 + (inputDate[3] - '0');
   int month = (inputDate[5] - '0') * 10 + (inputDate[6] - '0');
-  int day   = (inputDate[8] - '0') * 10 + (inputDate[9] - '0');
+  int day = (inputDate[8] - '0') * 10 + (inputDate[9] - '0');
 
-  int daysInMonth[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
+  int daysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
   // Leap year check
   bool isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
