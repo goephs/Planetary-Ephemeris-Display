@@ -13,7 +13,7 @@
 #include <TM1638.h>
 #include <TM16xxDisplay.h>
 
-// Initialize UART2 for receiving Pi data
+// Initialize Blue Pill UART2 for receiving Pi data
 HardwareSerial Serial2(PA3, PA2);
 
 // Allocate the JSON document
@@ -94,7 +94,7 @@ bool useUTC = false;
 
 void setup() {
   pinMode(MODE_SWITCH_PIN, INPUT_PULLUP);  // Active LOW
-  
+
    // Start the default serial console
   Serial.begin(115200);
 
@@ -235,13 +235,46 @@ void loop() {
       return;
     }
 ///////////////////////////
-    // 🔌 Read SPST switch
-    bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;
+// 🔌 Read SPST switch
+bool useUTC = digitalRead(MODE_SWITCH_PIN) == HIGH;
 
-    // 📅 Detect UTC rollover
-    String localDate = String(doc["LocalTime"]).substring(0, 10);
-    String utcDate   = String(doc["time"]).substring(0, 10);
-    bool utcIsNextDay = (utcDate != localDate);
+// Fetch time and date from JSON
+const char* date    = doc["date"];           // "2025-01-16"
+const char* UTCtime = doc["time"];           // "18:22:27.000Z"
+
+char cleanTime[9];     // HH:MM:SS
+strncpy(cleanTime, UTCtime, 8);
+cleanTime[8] = '\0';
+
+bool utcIsNextDay = false;
+char utcDate[11];      // YYYY-MM-DD
+char localDate[11];    // YYYY-MM-DD
+char localTime[9];     // HH-MM-SS
+
+// Copy UTC date into buffer
+strncpy(utcDate, date, 10);
+utcDate[10] = '\0';
+
+// Convert time and detect rollover
+convertUTCToLocal(cleanTime, localTime, &utcIsNextDay);
+
+// Adjust local date if rollover occurred
+if (utcIsNextDay) {
+  decrementDate(utcDate, localDate);
+} else {
+  strncpy(localDate, utcDate, 11);
+}
+
+// Debug print
+Serial.print(F("Local Time: "));
+Serial.println(localTime);
+Serial.print(F("UTC Time: "));
+Serial.println(cleanTime);
+Serial.print(F("Local Date: "));
+Serial.println(localDate);
+Serial.print(F("UTC Date: "));
+Serial.println(utcDate);
+
 
     // 🎛️ Read TM1638 buttons
     uint8_t buttons = tm1638.readButtons();
@@ -260,7 +293,7 @@ void loop() {
     // 🖥️ Display planet rise/set
     displayPlanet(planet.name, riseStr, setStr, useUTC, utcIsNextDay);
 /////////////////////////
-    // Fetch the values from the JSON structure   
+    // Fetch the values from the JSON structure
 
     //const char* LocalTime = doc["LocalTime"];  // "2025/1/16 13:22:30"
     const char* date = doc["date"];            // "2025-01-16"
@@ -501,28 +534,62 @@ void loop() {
   }
 }
 void displayPlanet(const char* label, const char* riseStr, const char* setStr, bool useUTC, bool utcIsNextDay) {
-  String riseTime = String(riseStr).substring(11, 16);  // "HH:MM"
-  String setTime  = String(setStr).substring(11, 16);   // "HH:MM"
-  String mode     = useUTC ? (utcIsNextDay ? "U+1" : "UTC") : "LOC";
+  // Extract HH:MM from timestamp string: "2025/9/19 06:39:32"
+  String riseTime = String(riseStr).substring(11, 16);  // "06:39"
+  String setTime  = String(setStr).substring(11, 16);   // "18:56"
 
-  String displayStr = String(label) + " " + riseTime + " " + setTime + " " + mode;
-  displayText(displayStr);  // Your TM1638/TM1637 output function
+  // Optional: annotate mode
+  // String modeLabel = useUTC ? (utcIsNextDay ? "UTC+1" : "UTC") : "LOCAL";
+
+  // Display rise/set times on separate modules
+  display_rise.println(riseTime);  // Left module
+  display_set.println(setTime);    // Right module
 }
 
 
-void convertUTCToLocal(const char* utcTime, char* output) {
-  // Extract hours, minutes, seconds from fixed positions
+void convertUTCToLocal(const char* utcTime, char* output, bool* didRollover) {
   int hour = (utcTime[0] - '0') * 10 + (utcTime[1] - '0');
   int minute = (utcTime[3] - '0') * 10 + (utcTime[4] - '0');
   int second = (utcTime[6] - '0') * 10 + (utcTime[7] - '0');
 
-  // Apply UTC-5 offset
   hour -= 5;
-  if (hour < 0) hour += 24;  // wrap around for negative hours
+  if (hour < 0) {
+    hour += 24;
+    *didRollover = true;  // UTC was early morning, local is previous day
+  } else {
+    *didRollover = false;
+  }
 
-  // Format into HH-MM-SS with leading zeros
   sprintf(output, "%02d-%02d-%02d", hour, minute, second);
 }
+
+void decrementDate(const char* inputDate, char* outputDate) {
+  int year  = (inputDate[0] - '0') * 1000 + (inputDate[1] - '0') * 100 + (inputDate[2] - '0') * 10 + (inputDate[3] - '0');
+  int month = (inputDate[5] - '0') * 10 + (inputDate[6] - '0');
+  int day   = (inputDate[8] - '0') * 10 + (inputDate[9] - '0');
+
+  int daysInMonth[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
+
+  // Leap year check
+  bool isLeap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+  if (isLeap) daysInMonth[1] = 29;
+
+  day--;
+  if (day == 0) {
+    month--;
+    if (month == 0) {
+      month = 12;
+      year--;
+    }
+    day = daysInMonth[month - 1];
+  }
+
+  // Format back to YYYY-MM-DD
+  sprintf(outputDate, "%04d-%02d-%02d", year, month, day);
+}
+
+
+
 float convertDMSToDecimal(const char* dms) {
   int deg, min;
   int sec, tenths;
